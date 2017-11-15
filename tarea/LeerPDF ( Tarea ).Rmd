@@ -1,0 +1,368 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Cmd+Shift+Enter*. 
+
+```{r,echo=FALSE}
+
+Sys.setlocale("LC_ALL", "en_US.UTF-8")
+rm(list = ls())
+library('rvest')
+library(pdftools)
+library(stringr)
+
+
+
+pdf_file <- file.path("Datos/Padron2017Antartica.pdf")
+info <- pdf_info(pdf_file)
+text <- pdf_text(pdf_file)
+fonts <- pdf_fonts(pdf_file)
+files <- pdf_attachments(pdf_file)
+
+
+#LImpieza de Datos
+text<- gsub("1M\\n","1M-HH",text)
+text<-gsub("2V\\n","2V-HH",text)
+text<-gsub("3V\\n","3V-HH",text)
+text<- gsub("\n","",text)
+text<- gsub("1M-HH","-1M\n",text)
+text<-gsub("2V-HH","-2V\n",text)
+text<-gsub("3V-HH","-3V\n",text)
+text<- gsub("(\\s{3})+","\t",text)
+text<- gsub(" MUJ ","\tMUJ\t ",text)
+text<- gsub(" VAR ","\tVAR\t ",text)
+text<- gsub(" ANTARTICA","\tANTARTICA\t",text)
+text<- gsub("CIRCUNSCRIPCIÓN\tMESA","CIRCUNSCRIPCIÓN\tMESA \n",text)
+limpieza <- str_split(text,"\n")
+
+#Crea Data Frame Vacio
+Mi.Data <- data.frame(matrix(ncol = 6, nrow = 0))
+x <- c("Nombre", "Rut","Edad","Sexo", "Mesa", "Circunscripcion")
+colnames(Mi.Data) <- x
+
+#Recorremos Paginas
+h<-1
+for(h in 1:length(limpieza))
+{
+  
+  MiData.Hoja <- limpieza[h]
+  #Comienzo a recorres Filas por Hoja
+  r<-2
+  for(r in 2:length(MiData.Hoja[[1]]))
+  {
+    fila<-MiData.Hoja[[1]][r]
+   
+    d<-str_split(fila,"\t")
+   
+    Edad<- 0
+    
+    Largo<-length(d[[1]])
+
+
+      nombre <- trimws(d[[1]][1], which = c("both", "left", "right"))
+      nombre
+      
+      Rut<- trimws(d[[1]][2], which = c("both", "left", "right"))
+      Rut
+      
+      sexo<- d[[1]][3] 
+      sexo
+      
+      Circunscripcion<- "ANTARTICA"
+      Circunscripcion
+      
+      Mesa<- trimws(gsub("-","",d[[1]][Largo]), which = c("both", "left", "right"))
+      Mesa
+
+  
+    
+    #Limpieza de Rut
+    p.rutSucio<- strsplit(Rut,"-")
+    
+   
+    
+    if(is.na(p.rutSucio[[1]][1])) next
+    if(is.na(p.rutSucio[[1]][2])) next
+    
+    p.Rut <- as.numeric(gsub("[[:punct:]]","",p.rutSucio[[1]][1]))
+    p.DV<-substr(p.rutSucio[[1]][2], 1, 1)
+    p.RutLimpio=paste(p.Rut, p.DV, sep="-")
+    
+    if(is.numeric(p.Rut))
+    {
+      #Edad: 2017 – [Rut (dígitos de millones con 1 decimal) * 3,47 + 1930,3]
+      dig<-p.Rut / 1000000
+      Edad<- 2017 - (dig * 3.47 + 1930.3)
+      Edad<- abs(as.integer(Edad))
+      
+    } else {next}
+    
+    Mi.Data[nrow(Mi.Data) + 1,] = c(nombre,p.RutLimpio,Edad,sexo,Mesa,Circunscripcion)
+     
+  }
+}
+
+write.csv(Mi.Data, file = "Datos/Padron.csv")
+
+```
+
+```{r}
+library(shiny)
+library(shinydashboard)
+library(DT)
+library(dplyr)
+
+  total<-nrow(Mi.Data)
+  colnames <- unique(Mi.Data$Mesa)
+  colnames<-c(colnames,"---- Seleccione ----")
+  Data.Mujeres <- subset(Mi.Data, Sexo == "MUJ")
+  Data.Hombres <- subset(Mi.Data, Sexo == "VAR")
+  
+  NumeroMujeres<- nrow(subset(Mi.Data, Sexo == "MUJ")) 
+  NumeroHombres<- nrow(subset(Mi.Data, Sexo == "VAR")) 
+  porcentajeMujeres <- round(((NumeroMujeres * 100) / total), digits = 2) 
+  porcentajeHombres <- round(((NumeroHombres * 100) / total) , digits = 2) 
+  
+  
+  edades<-as.numeric(Mi.Data$Edad)
+
+ui <- dashboardPage(
+  dashboardHeader(
+       title = "Tarea 2 Herramientas Big Data UAI",
+      titleWidth = 350
+  ),
+  dashboardSidebar(
+      sidebarMenu(
+      menuItem("Dashboard Principal", tabName = "dashboard1", icon = icon("dashboard")),
+      menuItem("Nomina de Mujeres", tabName = "dashboard2", icon = icon("list")),
+      menuItem("Nomina de Hombre", tabName = "dashboard3", icon = icon("list"))
+    )
+  ),
+  dashboardBody(
+    tabItems(
+      # First tab content
+      tabItem(tabName = "dashboard1",
+        fluidRow(
+      # Clicking this will increment the progress amount
+          
+          column(width = 12, offset = 0,
+                       div(style = "width:100%;",       
+                          infoBoxOutput("progressBoxMen"),
+                          infoBoxOutput("progressBoxWoman")
+                          )
+                        ),tags$br()
+                    
+     
+      
+    ),
+              
+              fluidRow(
+                tags$h2("Tablero de Histogramas",align="center",style="color:blue"),
+          box(title = "Histograma Nº de Personas por Edades", background = "light-blue", solidHeader = TRUE,plotOutput("plot1", height = 250)),
+          
+
+          box(
+            title = "Control Histograma", border = "light-blue", solidHeader = FALSE,
+            sliderInput("slider", "Numero de Votantes:", 1, total, 801),
+            sidebarPanel(width = 190,selectInput("ComboMesas", "Mesas:", choices=colnames, width =180, selected = "---- Seleccione ----"),
+            helpText("Personas por Nº de Mesa"))
+            
+            
+          )
+          
+        )
+        
+      ),
+
+      # Second tab content
+      tabItem(tabName = "dashboard2",
+        h2("Nomina de Mujeres"),
+        
+        fluidRow(
+           column(width = 12, offset = 0,
+                   div(style = "width:100%;",       
+                       DT::dataTableOutput("MytableMujeres")
+                      )
+                    )
+                )
+      ),
+         tabItem(tabName = "dashboard3",
+            h2("Nomina de Hombres"),
+            
+            fluidRow(
+               column(width = 12, offset = 0,
+                       div(style = "width:100%;",       
+                           DT::dataTableOutput("MytableHombre")
+                          )
+                        )
+                    )
+          )
+    
+       
+    
+    )
+  )
+)
+
+
+
+server <- function(session, input, output) { 
+  output$plot1 <- renderPlot({
+    data <- edades[1:(input$slider)]
+    h<-hist(data,main = "" ,border="blue", 
+     col="green",xlab="Rango de Edades",ylim=c(1,total / 4))
+      xfit<-seq(min(data),max(data),length=40) 
+      yfit<-dnorm(xfit,mean=mean(data),sd=sd(data)) 
+      yfit <- yfit*diff(h$mids[1:2])*length(data) 
+      lines(xfit, yfit, col="blue", lwd=2)
+  })
+  
+   output$MytableMujeres = DT::renderDataTable({
+    Data.Mujeres
+  })
+   
+   output$MytableHombre = DT::renderDataTable({
+    Data.Hombres
+  })
+  
+  output$progressBoxWoman <- renderInfoBox({
+    infoBox(
+      "% Total de Mujeres", paste0(porcentajeMujeres, "%"), icon = icon("dashboard"),
+      color = "fuchsia",a("Ver",href="#shiny-tab-dashboard2", "data-toggle"= "tab")
+    )
+  })
+  
+   output$progressBoxMen <- renderInfoBox({
+    infoBox(
+      "% Total de Hombres", paste0(porcentajeHombres, "%"), icon = icon("dashboard"),
+      color = "blue",a("Ver",href="#shiny-tab-dashboard3", "data-toggle"= "tab")
+    )
+  })
+  
+  observe({
+
+
+    #if(cols==c("1M"){print(cols)updateSliderInput(session, "slider", min = 1, max = 20, value = 801)}
+   
+   
+  })
+  
+ 
+  
+  observeEvent(input$ComboMesas,{
+    
+    
+    cols <- isolate(input$ComboMesas)
+    
+    if (cols == "---- Seleccione ----"){
+      
+      #edades<-as.numeric(Mi.Data$Edad)
+      #trow<- as.numeric(nrow(Mi.Data$Mesa))
+      trow<- 234
+      updateSliderInput(session, "slider", value = trow,min = floor(trow/2), max = trow+4, step = (trow+1)%%2 + 1)
+      
+      
+      showNotification("Debe seleccionar una Mesa", type = "error")
+    } else {
+      
+       Data.Mesa <- subset(Mi.Data, Mesa == cols)
+       trow<- as.numeric(nrow(Data.Mesa))
+       edades<-as.numeric(Data.Mesa$Edad)
+       updateSliderInput(session, "slider", value = trow,min = floor(trow/2), max = trow+4, step = (trow+1)%%2 + 1)
+    }
+    
+    
+  
+  })
+  
+
+  
+  
+ 
+  
+   observeEvent(input$MiLink, {
+                    #runjs("$('a[data-value=\"dashboard3\"]').tab('show');")
+     updateTabsetPanel(session, "inTabset", selected = "dashboard3")
+     
+            })
+  
+  }
+
+shinyApp(ui, server)
+```
+
+```{r}
+Sys.setlocale("LC_ALL", "en_US.UTF-8")
+rm(list = ls())
+library('rvest')
+library(pdftools)
+library(stringr)
+
+pdf_file <- file.path("Datos/Padron2017Antartica.pdf")
+info <- pdf_info(pdf_file)
+text <- pdf_text(pdf_file)
+fonts <- pdf_fonts(pdf_file)
+files <- pdf_attachments(pdf_file)
+
+#LImpieza de Datos
+text<- gsub("1M\\n","1M-HH",text)
+text<-gsub("2V\\n","2V-HH",text)
+text<-gsub("3V\\n","3V-HH",text)
+text<- gsub("\n","",text)
+text<- gsub("1M-HH","-1M\n",text)
+text<-gsub("2V-HH","-2V\n",text)
+text<-gsub("3V-HH","-3V\n",text)
+text<- gsub("(\\s{3})+","\t",text)
+text<- gsub(" MUJ ","\tMUJ\t ",text)
+text<- gsub(" VAR ","\tVAR\t ",text)
+text<- gsub(" ANTARTICA","\tANTARTICA\t",text)
+text<- gsub("CIRCUNSCRIPCIÓN\tMESA","CIRCUNSCRIPCIÓN\tMESA \n",text)
+
+
+limpieza <- str_split(text,"\n")
+
+
+
+#limpieza <- str_split(limpieza,"\\n")
+
+MiData.Plana<- as.array(limpieza[1])
+
+fila<-MiData.Plana[[1]][2]
+
+head(fila)
+
+d<-str_split(fila,"\t")
+d
+
+
+Largo<-length(d[[1]])
+
+
+nombre <- trimws(d[[1]][1], which = c("both", "left", "right"))
+nombre
+
+Rut<- trimws(d[[1]][2], which = c("both", "left", "right"))
+Rut
+
+Sexo<- d[[1]][3] 
+Sexo
+
+Circunscripcion<- trimws(d[[1]][Largo -2], which = c("both", "left", "right"))
+Circunscripcion
+
+Mesa<- trimws(gsub("-","",d[[1]][Largo]), which = c("both", "left", "right"))
+Mesa
+
+
+
+
+```
+
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Cmd+Option+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Cmd+Shift+K* to preview the HTML file).
